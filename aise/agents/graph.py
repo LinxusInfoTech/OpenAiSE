@@ -29,10 +29,11 @@ from aise.agents.state import AiSEState, update_state, create_initial_state
 from aise.agents.ticket_agent import TicketAgent
 from aise.agents.knowledge_agent import KnowledgeAgent
 from aise.agents.engineer_agent import EngineerAgent
+from aise.agents.browser_agent import BrowserAgent, should_use_browser_fallback
 from aise.agents.approval import log_approval_request
 from aise.ai_engine.router import LLMRouter
 from aise.ticket_system.base import TicketProvider
-from aise.core.exceptions import ProviderError
+from aise.core.exceptions import ProviderError, TicketAPIError, BrowserError
 
 logger = structlog.get_logger(__name__)
 
@@ -58,7 +59,8 @@ class AiSEGraph:
         ticket_agent: TicketAgent,
         knowledge_agent: Optional[KnowledgeAgent],
         engineer_agent: EngineerAgent,
-        ticket_provider: Optional[TicketProvider] = None
+        ticket_provider: Optional[TicketProvider] = None,
+        browser_agent: Optional[BrowserAgent] = None
     ):
         """Initialize AiSEGraph.
         
@@ -67,11 +69,13 @@ class AiSEGraph:
             knowledge_agent: Documentation retrieval agent (optional)
             engineer_agent: Diagnosis and response generation agent
             ticket_provider: Ticket system provider (optional)
+            browser_agent: Browser automation agent (optional)
         """
         self._ticket_agent = ticket_agent
         self._knowledge_agent = knowledge_agent
         self._engineer_agent = engineer_agent
         self._ticket_provider = ticket_provider
+        self._browser_agent = browser_agent
         
         # Build the graph
         self._graph = self._build_graph()
@@ -79,7 +83,8 @@ class AiSEGraph:
         logger.info(
             "aise_graph_initialized",
             has_knowledge_agent=knowledge_agent is not None,
-            has_ticket_provider=ticket_provider is not None
+            has_ticket_provider=ticket_provider is not None,
+            has_browser_agent=browser_agent is not None
         )
     
     @classmethod
@@ -108,11 +113,21 @@ class AiSEGraph:
         # Optional ticket provider
         ticket_provider = kwargs.get("ticket_provider")
         
+        # Optional browser agent (only if fallback enabled)
+        browser_agent = None
+        if config.USE_BROWSER_FALLBACK:
+            try:
+                browser_agent = BrowserAgent()
+                logger.info("browser_agent_enabled_for_graph")
+            except Exception as e:
+                logger.warning("browser_agent_init_failed", error=str(e))
+        
         return cls(
             ticket_agent=ticket_agent,
             knowledge_agent=knowledge_agent,
             engineer_agent=engineer_agent,
-            ticket_provider=ticket_provider
+            ticket_provider=ticket_provider,
+            browser_agent=browser_agent
         )
     
     def _build_graph(self) -> StateGraph:
@@ -471,7 +486,7 @@ class AiSEGraph:
             return state
         
         try:
-            # Post reply
+            # Attempt to post reply via API
             await self._ticket_provider.reply(
                 state["ticket_id"],
                 state["diagnosis"]
@@ -484,10 +499,84 @@ class AiSEGraph:
                 actions_taken=state["actions_taken"] + ["Posted reply to ticket"]
             )
             
+        except TicketAPIError as api_error:
+            # Check if browser fallback should be used
+            from aise.core.config import get_config
+            config = get_config()
+            
+            if await should_use_browser_fallback(config, api_error):
+                logger.warning(
+                    "api_post_reply_failed_attempting_browser_fallback",
+                    ticket_id=state["ticket_id"],
+                    error=str(api_error)
+                )
+                
+                try:
+                    # Attempt browser fallback
+                    if not self._browser_agent:
+                        self._browser_agent = BrowserAgent()
+                    
+                    # Determine platform from ticket provider
+                    platform = self._detect_platform()
+                    
+                    result = await self._browser_agent.execute_action(
+                        platform=platform,
+                        action="reply",
+                        params={
+                            "ticket_id": state["ticket_id"],
+                            "message": state["diagnosis"]
+                        }
+                    )
+                    
+                    logger.info(
+                        "browser_fallback_post_reply_success",
+                        ticket_id=state["ticket_id"],
+                        screenshot=result.get("screenshot")
+                    )
+                    
+                    return update_state(
+                        state,
+                        actions_taken=state["actions_taken"] + [
+                            "Posted reply to ticket (via browser fallback)"
+                        ]
+                    )
+                    
+                except BrowserError as browser_error:
+                    logger.error(
+                        "browser_fallback_post_reply_failed",
+                        ticket_id=state["ticket_id"],
+                        api_error=str(api_error),
+                        browser_error=str(browser_error)
+                    )
+                    # Don't fail the whole workflow, just log
+                    return state
+            else:
+                logger.error("node_post_reply_failed", error=str(api_error))
+                # Don't fail the whole workflow, just log
+                return state
+        
         except Exception as e:
             logger.error("node_post_reply_failed", error=str(e))
             # Don't fail the whole workflow, just log
             return state
+    
+    def _detect_platform(self) -> str:
+        """
+        Detect platform from ticket provider class name.
+        
+        Returns:
+            Platform name ("zendesk" or "freshdesk")
+        """
+        if self._ticket_provider:
+            provider_class = self._ticket_provider.__class__.__name__.lower()
+            if "zendesk" in provider_class:
+                return "zendesk"
+            elif "freshdesk" in provider_class:
+                return "freshdesk"
+        
+        # Default to zendesk if can't detect
+        logger.warning("could_not_detect_platform_defaulting_to_zendesk")
+        return "zendesk"
     
     # Routing functions
     
