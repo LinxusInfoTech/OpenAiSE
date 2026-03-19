@@ -243,77 +243,26 @@ async def health_check():
 async def status_check():
     """Detailed component health status endpoint.
 
-    Shows health of all system components: Redis, PostgreSQL, ChromaDB,
-    and LLM provider.
+    Delegates to the dashboard module for a full system health snapshot
+    including component status and key operational metrics.
 
     Returns:
-        JSON with per-component status and overall health
+        JSON with per-component status, overall health, and metrics
     """
+    from aise.observability.dashboard import get_system_status
+
     config = get_config()
-    components = {}
-    overall_healthy = True
+    snapshot = await get_system_status(config)
 
-    # --- Redis ---
-    try:
-        redis_client = await get_redis_client()
-        await redis_client.ping()
-        queue_depth = await redis_client.llen("ticket_queue")
-        components["redis"] = {"status": "healthy", "queue_depth": queue_depth}
-    except Exception as e:
-        components["redis"] = {"status": "unhealthy", "error": str(e)}
-        overall_healthy = False
-
-    # --- PostgreSQL ---
-    try:
-        import asyncpg
-        conn = await asyncpg.connect(config.POSTGRES_URL, timeout=5)
-        await conn.fetchval("SELECT 1")
-        await conn.close()
-        components["postgres"] = {"status": "healthy"}
-    except Exception as e:
-        components["postgres"] = {"status": "unhealthy", "error": str(e)}
-        overall_healthy = False
-
-    # --- ChromaDB ---
-    try:
-        import httpx
-        chroma_url = f"http://{config.CHROMA_HOST}:{config.CHROMA_PORT}/api/v1/heartbeat"
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(chroma_url)
-            if resp.status_code == 200:
-                components["chromadb"] = {"status": "healthy"}
-            else:
-                components["chromadb"] = {"status": "unhealthy", "http_status": resp.status_code}
-                overall_healthy = False
-    except Exception as e:
-        components["chromadb"] = {"status": "unhealthy", "error": str(e)}
-        overall_healthy = False
-
-    # --- LLM Provider ---
-    try:
-        provider = config.LLM_PROVIDER
-        has_key = bool(
-            (provider == "anthropic" and config.ANTHROPIC_API_KEY) or
-            (provider == "openai" and config.OPENAI_API_KEY) or
-            (provider == "deepseek" and config.DEEPSEEK_API_KEY) or
-            (provider == "ollama" and config.OLLAMA_BASE_URL)
-        )
-        components["llm_provider"] = {
-            "status": "configured" if has_key else "not_configured",
-            "provider": provider,
-        }
-    except Exception as e:
-        components["llm_provider"] = {"status": "error", "error": str(e)}
-
-    http_status_code = status.HTTP_200_OK if overall_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+    http_status_code = (
+        status.HTTP_200_OK
+        if snapshot["status"] == "healthy"
+        else status.HTTP_503_SERVICE_UNAVAILABLE
+    )
 
     return JSONResponse(
         status_code=http_status_code,
-        content={
-            "status": "healthy" if overall_healthy else "degraded",
-            "service": "aise-webhook-server",
-            "components": components,
-        }
+        content={"service": "aise-webhook-server", **snapshot},
     )
 
 

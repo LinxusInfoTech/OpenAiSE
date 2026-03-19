@@ -207,6 +207,31 @@ class DatabaseManager:
         except Exception as e:
             logger.error("database_health_check_failed", error=str(e))
             return False
+
+    async def reconnect(self, max_retries: int = 3) -> bool:
+        """Attempt to reconnect to the database.
+
+        Closes the existing pool (if any) and re-initializes with
+        exponential backoff.  Useful when the pool becomes stale after
+        a network partition.
+
+        Args:
+            max_retries: Maximum reconnection attempts
+
+        Returns:
+            True if reconnection succeeded, False otherwise
+        """
+        logger.warning("database_reconnecting", max_retries=max_retries)
+        try:
+            if self._pool:
+                await self._pool.close()
+                self._pool = None
+            await self.initialize(max_retries=max_retries)
+            logger.info("database_reconnected")
+            return True
+        except Exception as exc:
+            logger.error("database_reconnect_failed", error=str(exc))
+            return False
     
     async def get_pool_stats(self) -> dict:
         """Get connection pool statistics.

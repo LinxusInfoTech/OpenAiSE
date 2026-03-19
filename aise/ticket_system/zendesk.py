@@ -13,6 +13,41 @@ from aise.core.exceptions import TicketAPIError, TicketNotFoundError
 logger = structlog.get_logger(__name__)
 
 
+async def _retry_with_backoff(coro_fn, max_retries: int = 3, base_delay: float = 1.0):
+    """Execute an async callable with exponential backoff retry.
+
+    Args:
+        coro_fn: Zero-argument async callable to retry
+        max_retries: Maximum number of attempts (default 3)
+        base_delay: Initial delay in seconds (doubles each retry)
+
+    Returns:
+        Result of coro_fn on success
+
+    Raises:
+        Last exception if all retries exhausted
+    """
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            return await coro_fn()
+        except TicketNotFoundError:
+            raise  # Don't retry 404s
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    "ticket_api_retry",
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    delay=delay,
+                    error=str(exc),
+                )
+                await asyncio.sleep(delay)
+    raise last_exc
+
+
 class ZendeskProvider(TicketProvider):
     """Zendesk API v2 ticket provider.
     
@@ -68,39 +103,32 @@ class ZendeskProvider(TicketProvider):
             List of open Ticket objects
         
         Raises:
-            TicketAPIError: If API request fails
+            TicketAPIError: If API request fails after retries
         """
-        try:
+        async def _do():
             logger.debug("listing_open_tickets", limit=limit)
-            
-            # Zendesk API endpoint for open tickets
             url = f"{self.base_url}/search.json"
             params = {
                 "query": "type:ticket status<solved",
-                "per_page": min(limit, 100),  # Zendesk max is 100
+                "per_page": min(limit, 100),
                 "sort_by": "updated_at",
                 "sort_order": "desc"
             }
-            
             response = await self.client.get(url, params=params)
             response.raise_for_status()
-            
             data = response.json()
             tickets = []
-            
             for ticket_data in data.get("results", []):
                 ticket = await self._parse_ticket(ticket_data)
                 tickets.append(ticket)
-            
             logger.info("open_tickets_listed", count=len(tickets))
             return tickets
-            
+
+        try:
+            return await _retry_with_backoff(_do)
         except httpx.HTTPStatusError as e:
             logger.error("zendesk_api_error", status=e.response.status_code, error=str(e))
-            raise TicketAPIError(
-                f"Zendesk API error: {e.response.status_code}",
-                provider="zendesk"
-            )
+            raise TicketAPIError(f"Zendesk API error: {e.response.status_code}", provider="zendesk")
         except Exception as e:
             logger.error("list_open_failed", error=str(e))
             raise TicketAPIError(f"Failed to list open tickets: {str(e)}", provider="zendesk")
@@ -156,7 +184,7 @@ class ZendeskProvider(TicketProvider):
             raise TicketAPIError(f"Failed to get ticket: {str(e)}", provider="zendesk")
     
     async def reply(self, ticket_id: str, message: str) -> None:
-        """Post reply to ticket.
+        """Post reply to ticket with exponential backoff retry.
         
         Args:
             ticket_id: Zendesk ticket ID
@@ -164,38 +192,25 @@ class ZendeskProvider(TicketProvider):
         
         Raises:
             TicketNotFoundError: If ticket doesn't exist
-            TicketAPIError: If API request fails
+            TicketAPIError: If API request fails after retries
         """
-        try:
+        async def _do():
             logger.debug("posting_reply", ticket_id=ticket_id)
-            
             url = f"{self.base_url}/tickets/{ticket_id}.json"
-            payload = {
-                "ticket": {
-                    "comment": {
-                        "body": message,
-                        "public": True
-                    }
-                }
-            }
-            
+            payload = {"ticket": {"comment": {"body": message, "public": True}}}
             response = await self.client.put(url, json=payload)
-            
             if response.status_code == 404:
                 raise TicketNotFoundError(f"Ticket not found: {ticket_id}")
-            
             response.raise_for_status()
-            
             logger.info("reply_posted", ticket_id=ticket_id)
-            
+
+        try:
+            await _retry_with_backoff(_do)
         except TicketNotFoundError:
             raise
         except httpx.HTTPStatusError as e:
             logger.error("zendesk_api_error", status=e.response.status_code, error=str(e))
-            raise TicketAPIError(
-                f"Zendesk API error: {e.response.status_code}",
-                provider="zendesk"
-            )
+            raise TicketAPIError(f"Zendesk API error: {e.response.status_code}", provider="zendesk")
         except Exception as e:
             logger.error("reply_failed", ticket_id=ticket_id, error=str(e))
             raise TicketAPIError(f"Failed to post reply: {str(e)}", provider="zendesk")

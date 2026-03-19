@@ -29,6 +29,7 @@ from aise.agents.state import AiSEState, update_state
 from aise.ai_engine.router import LLMRouter
 from aise.core.exceptions import ProviderError
 from aise.observability.tracer import get_tracer, agent_span
+from aise.observability.langsmith import get_run_metadata, is_enabled as langsmith_enabled
 
 logger = structlog.get_logger(__name__)
 
@@ -132,7 +133,11 @@ class EngineerAgent:
                     messages=prompt_messages,
                     system_prompt=ENGINEER_SYSTEM_PROMPT,
                     temperature=0.7,
-                    max_tokens=2048
+                    max_tokens=2048,
+                    run_metadata=get_run_metadata(
+                        ticket_id=state.get("ticket_id"),
+                        mode=state["mode"],
+                    ) if langsmith_enabled() else None,
                 )
                 
                 diagnosis = result.content
@@ -180,6 +185,16 @@ class EngineerAgent:
             messages.append({
                 "role": "user",
                 "content": f"Relevant documentation:\n\n{context_text}"
+            })
+        else:
+            # Warn LLM that documentation context is unavailable
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Note: Documentation context is currently unavailable "
+                    "(vector store may be offline or no documentation has been indexed). "
+                    "Please answer based on your training knowledge and note this limitation."
+                )
             })
         
         # Add user style context if available

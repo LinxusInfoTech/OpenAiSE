@@ -708,7 +708,23 @@ def load_config() -> Config:
     
     try:
         _config = Config()
+
+        # Configure structured logging with settings from config
+        from aise.core.logging import setup_logging
+        setup_logging(
+            log_level=_config.LOG_LEVEL,
+            debug=_config.DEBUG,
+            json_output=not _config.DEBUG,
+            enable_pii_redaction=True,
+        )
+
         _config.log_configuration_sources()
+        
+        # Auto-configure LangSmith if API key is present
+        if _config.LANGSMITH_API_KEY:
+            from aise.observability.langsmith import configure_langsmith
+            configure_langsmith(api_key=_config.LANGSMITH_API_KEY)
+        
         return _config
     except Exception as e:
         logger.error("Failed to load configuration", error=str(e))

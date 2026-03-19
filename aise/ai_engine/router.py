@@ -16,8 +16,9 @@ Example usage:
     >>> print(result.content)
 """
 
-from typing import List, Dict, Optional, AsyncIterator
+from typing import List, Dict, Optional, AsyncIterator, Any
 from datetime import datetime, timedelta
+from enum import Enum
 import structlog
 
 from aise.ai_engine.base import LLMProvider, CompletionResult
@@ -30,6 +31,62 @@ from aise.observability.tracer import get_tracer, llm_span
 from aise.observability.metrics import record_llm_call, record_llm_error
 
 logger = structlog.get_logger(__name__)
+
+
+class CircuitState(Enum):
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Failing — reject calls
+    HALF_OPEN = "half_open"  # Testing recovery
+
+
+class CircuitBreaker:
+    """Circuit breaker for LLM provider calls.
+
+    States:
+        CLOSED  → normal; failures increment counter
+        OPEN    → provider blocked until cooldown expires
+        HALF_OPEN → one trial call allowed; success → CLOSED, failure → OPEN
+
+    Args:
+        failure_threshold: Consecutive failures before opening circuit
+        cooldown_seconds: Seconds to wait before moving to HALF_OPEN
+    """
+
+    def __init__(self, failure_threshold: int = 3, cooldown_seconds: int = 300):
+        self.failure_threshold = failure_threshold
+        self.cooldown_seconds = cooldown_seconds
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._opened_at: Optional[datetime] = None
+
+    @property
+    def state(self) -> CircuitState:
+        if self._state == CircuitState.OPEN:
+            if self._opened_at and (
+                datetime.utcnow() - self._opened_at
+            ).total_seconds() >= self.cooldown_seconds:
+                self._state = CircuitState.HALF_OPEN
+                logger.info("circuit_breaker_half_open")
+        return self._state
+
+    def is_available(self) -> bool:
+        return self.state in (CircuitState.CLOSED, CircuitState.HALF_OPEN)
+
+    def record_success(self) -> None:
+        self._failure_count = 0
+        self._state = CircuitState.CLOSED
+        self._opened_at = None
+
+    def record_failure(self) -> None:
+        self._failure_count += 1
+        if self._state == CircuitState.HALF_OPEN or self._failure_count >= self.failure_threshold:
+            self._state = CircuitState.OPEN
+            self._opened_at = datetime.utcnow()
+            logger.warning(
+                "circuit_breaker_opened",
+                failures=self._failure_count,
+                cooldown_seconds=self.cooldown_seconds,
+            )
 
 
 class LLMRouter:
@@ -49,7 +106,7 @@ class LLMRouter:
         """
         self._config = config
         self._providers: Dict[str, LLMProvider] = {}
-        self._provider_failures: Dict[str, datetime] = {}
+        self._circuit_breakers: Dict[str, CircuitBreaker] = {}
         self._cooldown_minutes = 5
         self._tracer = get_tracer("aise.ai_engine.router")
         
@@ -128,43 +185,41 @@ class LLMRouter:
         return priority
     
     def _is_provider_available(self, provider_name: str) -> bool:
-        """Check if provider is available (not in cooldown).
-        
+        """Check if provider circuit breaker allows calls.
+
         Args:
             provider_name: Name of the provider
-        
+
         Returns:
-            True if provider is available, False if in cooldown
+            True if provider is available
         """
-        if provider_name not in self._provider_failures:
-            return True
-        
-        failure_time = self._provider_failures[provider_name]
-        cooldown_end = failure_time + timedelta(minutes=self._cooldown_minutes)
-        
-        if datetime.utcnow() >= cooldown_end:
-            # Cooldown period has passed, remove from failures
-            del self._provider_failures[provider_name]
-            logger.info(
-                "provider_cooldown_expired",
-                provider=provider_name
+        if provider_name not in self._circuit_breakers:
+            self._circuit_breakers[provider_name] = CircuitBreaker(
+                cooldown_seconds=self._cooldown_minutes * 60
             )
-            return True
-        
-        return False
-    
-    def _mark_provider_failed(self, provider_name: str):
-        """Mark provider as failed and start cooldown period.
-        
+        return self._circuit_breakers[provider_name].is_available()
+
+    def _mark_provider_failed(self, provider_name: str) -> None:
+        """Record a provider failure in its circuit breaker.
+
         Args:
             provider_name: Name of the provider that failed
         """
-        self._provider_failures[provider_name] = datetime.utcnow()
-        logger.warning(
-            "provider_marked_failed",
-            provider=provider_name,
-            cooldown_minutes=self._cooldown_minutes
-        )
+        if provider_name not in self._circuit_breakers:
+            self._circuit_breakers[provider_name] = CircuitBreaker(
+                cooldown_seconds=self._cooldown_minutes * 60
+            )
+        self._circuit_breakers[provider_name].record_failure()
+        logger.warning("provider_marked_failed", provider=provider_name)
+
+    def _mark_provider_success(self, provider_name: str) -> None:
+        """Record a provider success in its circuit breaker.
+
+        Args:
+            provider_name: Name of the provider that succeeded
+        """
+        if provider_name in self._circuit_breakers:
+            self._circuit_breakers[provider_name].record_success()
     
     def get_provider(self, provider_name: Optional[str] = None) -> LLMProvider:
         """Get a specific provider or the default provider.
@@ -200,7 +255,8 @@ class LLMRouter:
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        run_metadata: Optional[Dict[str, Any]] = None,
     ) -> CompletionResult:
         """Route completion request to provider with automatic failover.
         
@@ -229,6 +285,10 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 model=model
             )
+        
+        # Log LangSmith metadata if present
+        if run_metadata:
+            logger.debug("llm_run_metadata", **run_metadata)
         
         # Try providers in priority order with failover
         last_error = None
@@ -287,6 +347,7 @@ class LLMRouter:
                     tokens=result.usage.total_tokens
                 )
                 
+                self._mark_provider_success(provider_name)
                 return result
                 
             except AuthenticationError as e:
