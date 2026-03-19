@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import structlog
 import redis.asyncio as redis
 import asyncpg
+from aise.observability.metrics import record_cache_op
 
 from aise.ticket_system.base import Message
 from aise.core.exceptions import DatabaseError
@@ -174,6 +175,8 @@ class ConversationMemory:
         # Set expiration (1 hour)
         await self.redis.expire(cache_key, 3600)
         
+        record_cache_op("set", "ok")
+        
         logger.debug(
             "redis_cache_updated",
             ticket_id=ticket_id,
@@ -207,7 +210,10 @@ class ConversationMemory:
                         ticket_id=ticket_id,
                         count=len(cached_messages)
                     )
+                    record_cache_op("get", "hit")
                     return cached_messages
+                else:
+                    record_cache_op("get", "miss")
             except Exception as e:
                 logger.warning(
                     "redis_cache_read_failed",

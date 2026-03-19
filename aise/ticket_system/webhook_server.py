@@ -35,6 +35,12 @@ import redis.asyncio as redis
 
 from aise.core.config import get_config
 from aise.core.exceptions import ValidationError
+from aise.observability.metrics import (
+    record_request,
+    get_metrics_output,
+    TICKET_QUEUE_DEPTH,
+    TICKETS_PROCESSED,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -183,6 +189,10 @@ async def enqueue_ticket(ticket_id: str, platform: str, payload: Dict[str, Any])
     # Push to Redis queue (left push for FIFO with right pop)
     await redis_client.lpush("ticket_queue", json.dumps(queue_item))
     
+    # Update queue depth metric
+    queue_depth = await redis_client.llen("ticket_queue")
+    TICKET_QUEUE_DEPTH.set(queue_depth)
+    
     logger.info(
         "ticket_enqueued",
         ticket_id=ticket_id,
@@ -227,6 +237,92 @@ async def health_check():
                 "error": str(e)
             }
         )
+
+
+@app.get("/status")
+async def status_check():
+    """Detailed component health status endpoint.
+
+    Shows health of all system components: Redis, PostgreSQL, ChromaDB,
+    and LLM provider.
+
+    Returns:
+        JSON with per-component status and overall health
+    """
+    config = get_config()
+    components = {}
+    overall_healthy = True
+
+    # --- Redis ---
+    try:
+        redis_client = await get_redis_client()
+        await redis_client.ping()
+        queue_depth = await redis_client.llen("ticket_queue")
+        components["redis"] = {"status": "healthy", "queue_depth": queue_depth}
+    except Exception as e:
+        components["redis"] = {"status": "unhealthy", "error": str(e)}
+        overall_healthy = False
+
+    # --- PostgreSQL ---
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(config.POSTGRES_URL, timeout=5)
+        await conn.fetchval("SELECT 1")
+        await conn.close()
+        components["postgres"] = {"status": "healthy"}
+    except Exception as e:
+        components["postgres"] = {"status": "unhealthy", "error": str(e)}
+        overall_healthy = False
+
+    # --- ChromaDB ---
+    try:
+        import httpx
+        chroma_url = f"http://{config.CHROMA_HOST}:{config.CHROMA_PORT}/api/v1/heartbeat"
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(chroma_url)
+            if resp.status_code == 200:
+                components["chromadb"] = {"status": "healthy"}
+            else:
+                components["chromadb"] = {"status": "unhealthy", "http_status": resp.status_code}
+                overall_healthy = False
+    except Exception as e:
+        components["chromadb"] = {"status": "unhealthy", "error": str(e)}
+        overall_healthy = False
+
+    # --- LLM Provider ---
+    try:
+        provider = config.LLM_PROVIDER
+        has_key = bool(
+            (provider == "anthropic" and config.ANTHROPIC_API_KEY) or
+            (provider == "openai" and config.OPENAI_API_KEY) or
+            (provider == "deepseek" and config.DEEPSEEK_API_KEY) or
+            (provider == "ollama" and config.OLLAMA_BASE_URL)
+        )
+        components["llm_provider"] = {
+            "status": "configured" if has_key else "not_configured",
+            "provider": provider,
+        }
+    except Exception as e:
+        components["llm_provider"] = {"status": "error", "error": str(e)}
+
+    http_status_code = status.HTTP_200_OK if overall_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return JSONResponse(
+        status_code=http_status_code,
+        content={
+            "status": "healthy" if overall_healthy else "degraded",
+            "service": "aise-webhook-server",
+            "components": components,
+        }
+    )
+
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    """Expose Prometheus metrics."""
+    from fastapi.responses import Response
+    output, content_type = get_metrics_output()
+    return Response(content=output, media_type=content_type)
 
 
 @app.post("/webhook/zendesk")
@@ -333,6 +429,8 @@ async def zendesk_webhook(request: Request):
         ticket_id=ticket_id,
         client_ip=client_ip
     )
+    
+    record_request("webhook_zendesk", "success", 0.0)
     
     return {
         "status": "queued",
@@ -445,6 +543,8 @@ async def freshdesk_webhook(request: Request):
         ticket_id=ticket_id,
         client_ip=client_ip
     )
+    
+    record_request("webhook_freshdesk", "success", 0.0)
     
     return {
         "status": "queued",
@@ -591,6 +691,8 @@ async def slack_webhook(request: Request):
         ticket_id=ticket_id,
         client_ip=client_ip
     )
+    
+    record_request("webhook_slack", "success", 0.0)
     
     return {
         "status": "queued",

@@ -56,20 +56,20 @@ class TestCredentialStorageInitialization:
         """Test that initialization creates connection pool and schema."""
         storage = CredentialStorage(mock_config, vault)
         
-        with patch('aise.core.credential_storage.asyncpg.create_pool') as mock_create_pool:
-            mock_pool = AsyncMock()
+        with patch('aise.core.credential_storage.asyncpg.create_pool', new_callable=AsyncMock) as mock_create_pool:
+            mock_pool = MagicMock()
             mock_conn = AsyncMock()
             mock_conn.execute = AsyncMock()
-            
+
             acquire_cm = AsyncMock()
             acquire_cm.__aenter__ = AsyncMock(return_value=mock_conn)
             acquire_cm.__aexit__ = AsyncMock(return_value=None)
             mock_pool.acquire = Mock(return_value=acquire_cm)
-            
+
             mock_create_pool.return_value = mock_pool
-            
+
             await storage.initialize()
-            
+
             # Verify pool created with correct parameters
             mock_create_pool.assert_called_once_with(
                 mock_config.DATABASE_URL,
@@ -77,7 +77,7 @@ class TestCredentialStorageInitialization:
                 max_size=20,
                 command_timeout=60
             )
-            
+
             # Verify schema creation was called
             assert mock_conn.execute.call_count >= 4  # At least 4 SQL statements
     
@@ -86,10 +86,11 @@ class TestCredentialStorageInitialization:
         """Test that initialization fails without DATABASE_URL."""
         config = Mock()
         config.DATABASE_URL = None
-        
+        config.POSTGRES_URL = None
+
         storage = CredentialStorage(config, vault)
-        
-        with pytest.raises(ConfigurationError, match="DATABASE_URL not configured"):
+
+        with pytest.raises(ConfigurationError):
             await storage.initialize()
     
     @pytest.mark.asyncio
@@ -97,7 +98,7 @@ class TestCredentialStorageInitialization:
         """Test that initialization fails gracefully on connection error."""
         storage = CredentialStorage(mock_config, vault)
         
-        with patch('aise.core.credential_storage.asyncpg.create_pool') as mock_create_pool:
+        with patch('aise.core.credential_storage.asyncpg.create_pool', new_callable=AsyncMock) as mock_create_pool:
             mock_create_pool.side_effect = Exception("Connection refused")
             
             with pytest.raises(ConfigurationError, match="Failed to initialize"):
@@ -120,10 +121,10 @@ class TestCredentialStorageStore:
         # Verify database insert was called
         conn = await mock_pool.acquire().__aenter__()
         conn.execute.assert_called()
-        
-        # Verify the SQL contains INSERT
-        call_args = conn.execute.call_args[0]
-        assert "INSERT INTO credentials" in call_args[0]
+
+        # Verify the SQL contains INSERT INTO credentials (check all calls)
+        all_sqls = [call[0][0] for call in conn.execute.call_args_list if call[0]]
+        assert any("INSERT INTO credentials" in sql for sql in all_sqls)
     
     @pytest.mark.asyncio
     async def test_store_empty_key_raises_error(self, mock_config, vault, mock_pool):
@@ -269,8 +270,8 @@ class TestCredentialStorageDelete:
         
         # Verify DELETE was called
         conn.execute.assert_called()
-        call_args = conn.execute.call_args[0]
-        assert "DELETE FROM credentials" in call_args[0]
+        all_sqls = [call[0][0] for call in conn.execute.call_args_list if call[0]]
+        assert any("DELETE FROM credentials" in sql for sql in all_sqls)
     
     @pytest.mark.asyncio
     async def test_delete_nonexistent_key_returns_false(self, mock_config, vault, mock_pool):

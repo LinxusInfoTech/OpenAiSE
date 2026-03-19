@@ -28,6 +28,7 @@ import structlog
 from aise.agents.state import AiSEState, update_state
 from aise.ai_engine.router import LLMRouter
 from aise.core.exceptions import ProviderError
+from aise.observability.tracer import get_tracer, agent_span
 
 logger = structlog.get_logger(__name__)
 
@@ -80,6 +81,7 @@ class EngineerAgent:
             llm_router: LLM router for completion requests
         """
         self._llm = llm_router
+        self._tracer = get_tracer("aise.agents.engineer")
         logger.info("engineer_agent_initialized")
     
     async def diagnose(self, state: AiSEState) -> AiSEState:
@@ -116,14 +118,26 @@ class EngineerAgent:
             prompt_messages = self._build_prompt(state)
             
             # Get diagnosis from LLM
-            result = await self._llm.complete(
-                messages=prompt_messages,
-                system_prompt=ENGINEER_SYSTEM_PROMPT,
-                temperature=0.7,
-                max_tokens=2048
-            )
-            
-            diagnosis = result.content
+            with agent_span(
+                self._tracer,
+                "engineer_agent.diagnose",
+                {
+                    "agent.message_count": len(state["messages"]),
+                    "agent.mode": state["mode"],
+                    "agent.has_knowledge_context": len(state["knowledge_context"]) > 0,
+                    "agent.ticket_id": state.get("ticket_id", ""),
+                },
+            ) as span:
+                result = await self._llm.complete(
+                    messages=prompt_messages,
+                    system_prompt=ENGINEER_SYSTEM_PROMPT,
+                    temperature=0.7,
+                    max_tokens=2048
+                )
+                
+                diagnosis = result.content
+                span.set_attribute("agent.diagnosis_length", len(diagnosis))
+                span.set_attribute("llm.tokens_used", result.usage.total_tokens)
             
             logger.info(
                 "engineer_diagnose_success",

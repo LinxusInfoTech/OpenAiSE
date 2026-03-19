@@ -35,6 +35,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import hashlib
 import structlog
+from aise.observability.metrics import VECTOR_STORE_QUERY_LATENCY
 
 try:
     import chromadb
@@ -341,12 +342,15 @@ class ChromaDBVectorStore(VectorStore):
             )
         
         try:
+            import time as _time
+            _t0 = _time.monotonic()
             # Query ChromaDB
             results = self._collection.query(
                 query_texts=[query],
                 n_results=top_k,
                 where=filter
             )
+            VECTOR_STORE_QUERY_LATENCY.observe(_time.monotonic() - _t0)
             
             # Convert results to DocumentChunk objects
             chunks = []

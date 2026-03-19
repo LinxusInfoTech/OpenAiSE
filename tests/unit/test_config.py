@@ -4,6 +4,7 @@
 import os
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 from pydantic import ValidationError
 from aise.core.config import Config, load_config, get_config
 
@@ -15,20 +16,24 @@ class TestConfigValidation:
         """Test that POSTGRES_URL is required."""
         monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        
-        with pytest.raises(ValidationError) as exc_info:
-            Config()
-        
+        monkeypatch.delenv("POSTGRES_URL", raising=False)
+
+        with patch('aise.core.config.Config.model_config', new={'env_file': None, 'env_file_encoding': 'utf-8', 'extra': 'ignore'}):
+            with pytest.raises(ValidationError) as exc_info:
+                Config(_env_file=None)
+
         assert "POSTGRES_URL" in str(exc_info.value)
-    
+
     def test_config_requires_redis_url(self, monkeypatch):
         """Test that REDIS_URL is required."""
         monkeypatch.setenv("POSTGRES_URL", "postgresql://localhost:5432/aise")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        
-        with pytest.raises(ValidationError) as exc_info:
-            Config()
-        
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        with patch('aise.core.config.Config.model_config', new={'env_file': None, 'env_file_encoding': 'utf-8', 'extra': 'ignore'}):
+            with pytest.raises(ValidationError) as exc_info:
+                Config(_env_file=None)
+
         assert "REDIS_URL" in str(exc_info.value)
     
     def test_config_requires_llm_provider_key(self, monkeypatch):
@@ -85,8 +90,12 @@ class TestConfigDefaults:
         monkeypatch.setenv("POSTGRES_URL", "postgresql://localhost:5432/aise")
         monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("AISE_MODE", "approval")
+        monkeypatch.setenv("EMBEDDING_MODEL", "openai")
         
-        config = Config()
+        config = Config(_env_file=None)
         
         assert config.LLM_PROVIDER == "anthropic"
         assert config.AISE_MODE == "approval"
@@ -180,10 +189,13 @@ class TestConfigSourceTracking:
         monkeypatch.setenv("POSTGRES_URL", "postgresql://localhost:5432/aise")
         monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        
-        config = Config()
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.delenv("AISE_MODE", raising=False)
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
+        config = Config(_env_file=None)
         sources = config.get_config_sources()
-        
+
         assert sources["CHROMA_HOST"] == "default"
         assert sources["CHROMA_PORT"] == "default"
         assert sources["AISE_MODE"] == "default"

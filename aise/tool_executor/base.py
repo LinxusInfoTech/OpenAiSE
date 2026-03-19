@@ -17,6 +17,8 @@ import structlog
 from aise.tool_executor.allowlist import CommandAllowlist
 from aise.tool_executor.runner import SubprocessRunner
 from aise.core.exceptions import ForbiddenCommandError, ToolExecutionError
+from aise.observability.tracer import get_tracer, tool_span
+from aise.observability.metrics import record_tool_execution
 
 logger = structlog.get_logger(__name__)
 
@@ -124,6 +126,7 @@ class ToolExecutor:
         self.allowlist = allowlist or CommandAllowlist()
         self.runner = runner or SubprocessRunner(default_timeout=default_timeout)
         self.audit_log: List[Dict[str, Any]] = []
+        self._tracer = get_tracer("aise.tool_executor")
         
         logger.info(
             "ToolExecutor initialized",
@@ -181,28 +184,41 @@ class ToolExecutor:
                 error="Forbidden command blocked",
                 timestamp=datetime.utcnow().isoformat()
             )
+            tool_name = command.split()[0] if command else "unknown"
+            record_tool_execution(tool_name, "forbidden", 0.0)
             raise
         
         # Step 2: Execute command
         start_time = datetime.utcnow()
         
         try:
-            result_dict = await self.runner.run(
-                command=command,
-                timeout=timeout,
-                env=env,
-                cwd=cwd
-            )
+            import time as _time
+            _t0 = _time.monotonic()
+            with tool_span(self._tracer, command) as span:
+                result_dict = await self.runner.run(
+                    command=command,
+                    timeout=timeout,
+                    env=env,
+                    cwd=cwd
+                )
+                
+                # Step 3: Create ToolResult
+                tool_result = ToolResult(
+                    command=result_dict["command"],
+                    stdout=result_dict["stdout"],
+                    stderr=result_dict["stderr"],
+                    exit_code=result_dict["exit_code"],
+                    duration_ms=result_dict["duration_ms"],
+                    timestamp=start_time.isoformat()
+                )
+                
+                span.set_attribute("tool.exit_code", tool_result.exit_code)
+                span.set_attribute("tool.duration_ms", tool_result.duration_ms)
             
-            # Step 3: Create ToolResult
-            tool_result = ToolResult(
-                command=result_dict["command"],
-                stdout=result_dict["stdout"],
-                stderr=result_dict["stderr"],
-                exit_code=result_dict["exit_code"],
-                duration_ms=result_dict["duration_ms"],
-                timestamp=start_time.isoformat()
-            )
+            _duration = _time.monotonic() - _t0
+            tool_name = command.split()[0] if command else "unknown"
+            status = "success" if tool_result.exit_code == 0 else "failure"
+            record_tool_execution(tool_name, status, _duration)
             
             # Step 4: Audit log the execution
             self._audit_log_execution(

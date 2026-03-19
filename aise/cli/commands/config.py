@@ -32,7 +32,7 @@ config_app = typer.Typer(
 
 @config_app.command()
 def show(
-    reveal: bool = typer.Option(False, "--reveal/--no-reveal", help="Show unmasked sensitive values (API keys, passwords)")
+    reveal: bool = typer.Option(False, "--reveal", "--no-reveal", help="Show unmasked sensitive values (API keys, passwords)")
 ):
     """Display all configuration organized by section.
     

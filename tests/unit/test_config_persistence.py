@@ -10,7 +10,10 @@ from aise.core.exceptions import ConfigurationError
 @pytest.fixture
 def mock_config():
     """Create a mock configuration instance."""
-    config = MagicMock()
+    config = MagicMock(spec=[
+        'POSTGRES_URL', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY',
+        'LLM_PROVIDER', 'AISE_MODE', 'model_fields'
+    ])
     config.POSTGRES_URL = "postgresql://user:pass@localhost/test"
     config.ANTHROPIC_API_KEY = None
     config.OPENAI_API_KEY = None
@@ -37,43 +40,43 @@ def mock_credential_storage():
 @pytest.fixture
 async def persistence(mock_config, mock_credential_storage):
     """Create a ConfigPersistence instance with mocked dependencies."""
-    with patch('aise.config_ui.persistence.asyncpg.create_pool') as mock_pool:
+    with patch('aise.config_ui.persistence.asyncpg.create_pool', new_callable=AsyncMock) as mock_pool:
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock()
         mock_conn.fetchrow = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
-        
-        mock_pool_instance = AsyncMock()
+
+        mock_pool_instance = MagicMock()
         mock_pool_instance.acquire = MagicMock()
         mock_pool_instance.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool_instance.acquire.return_value.__aexit__ = AsyncMock()
+        mock_pool_instance.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_pool_instance.close = AsyncMock()
-        
-        # Make create_pool return the mock pool instance directly (not awaitable)
+
+        # create_pool is now an AsyncMock, so awaiting it returns mock_pool_instance
         mock_pool.return_value = mock_pool_instance
-        
+
         persistence = ConfigPersistence(mock_config, mock_credential_storage)
         await persistence.initialize()
-        
+
         yield persistence
 
 
 @pytest.mark.asyncio
 async def test_initialize_creates_schema(mock_config, mock_credential_storage):
     """Test that initialize creates the database schema."""
-    with patch('aise.config_ui.persistence.asyncpg.create_pool') as mock_pool:
+    with patch('aise.config_ui.persistence.asyncpg.create_pool', new_callable=AsyncMock) as mock_pool:
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock()
-        
-        mock_pool_instance = AsyncMock()
+
+        mock_pool_instance = MagicMock()
         mock_pool_instance.acquire = MagicMock()
         mock_pool_instance.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool_instance.acquire.return_value.__aexit__ = AsyncMock()
+        mock_pool_instance.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_pool.return_value = mock_pool_instance
-        
+
         persistence = ConfigPersistence(mock_config, mock_credential_storage)
         await persistence.initialize()
-        
+
         # Verify schema creation was called
         assert mock_conn.execute.call_count >= 2  # At least table and index creation
 

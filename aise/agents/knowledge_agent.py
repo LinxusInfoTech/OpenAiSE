@@ -22,6 +22,7 @@ Example usage:
 
 import structlog
 from typing import List, Dict, Optional
+from aise.observability.tracer import get_tracer, agent_span
 
 logger = structlog.get_logger(__name__)
 
@@ -43,6 +44,7 @@ class KnowledgeAgent:
         """
         self._vector_store = vector_store
         self._embedder = embedder
+        self._tracer = get_tracer("aise.agents.knowledge")
     
     async def retrieve(
         self,
@@ -79,50 +81,59 @@ class KnowledgeAgent:
                 )
                 return []
             
-            logger.info(
-                "knowledge_retrieval_started",
-                query=query[:100],
-                top_k=top_k,
-                source_filter=source_filter,
-                indexed_sources=len(indexed_sources)
-            )
-            
-            # Build filter for vector store search
-            filter_dict = None
-            if source_filter:
-                filter_dict = {"source": source_filter}
-            
-            # Search vector store (ChromaDB handles embedding internally)
-            chunks = await self._vector_store.search(
-                query=query,
-                top_k=top_k,
-                filter=filter_dict
-            )
-            
-            # Convert DocumentChunk objects to result dictionaries
-            results = []
-            for i, chunk in enumerate(chunks):
-                # ChromaDB returns results in order of relevance
-                # We use inverse rank as a simple relevance score (1.0 = most relevant)
-                score = 1.0 - (i / max(len(chunks), 1))
+            with agent_span(
+                self._tracer,
+                "knowledge_agent.retrieve",
+                {
+                    "agent.query_length": len(query),
+                    "agent.top_k": top_k,
+                    "agent.source_filter": source_filter or "",
+                    "agent.indexed_sources": len(indexed_sources),
+                },
+            ) as span:
+                logger.info(
+                    "knowledge_retrieval_started",
+                    query=query[:100],
+                    top_k=top_k,
+                    source_filter=source_filter,
+                    indexed_sources=len(indexed_sources)
+                )
                 
-                result = {
-                    "text": chunk.content,
-                    "source_url": chunk.source_url,
-                    "source_name": chunk.metadata.get("source", "unknown"),
-                    "heading_context": chunk.heading_context,
-                    "score": score
-                }
-                results.append(result)
-            
-            logger.info(
-                "knowledge_retrieval_completed",
-                query=query[:100],
-                results_count=len(results),
-                source_filter=source_filter
-            )
-            
-            return results
+                # Build filter for vector store search
+                filter_dict = None
+                if source_filter:
+                    filter_dict = {"source": source_filter}
+                
+                # Search vector store (ChromaDB handles embedding internally)
+                chunks = await self._vector_store.search(
+                    query=query,
+                    top_k=top_k,
+                    filter=filter_dict
+                )
+                
+                # Convert DocumentChunk objects to result dictionaries
+                results = []
+                for i, chunk in enumerate(chunks):
+                    score = 1.0 - (i / max(len(chunks), 1))
+                    result = {
+                        "text": chunk.content,
+                        "source_url": chunk.source_url,
+                        "source_name": chunk.metadata.get("source", "unknown"),
+                        "heading_context": chunk.heading_context,
+                        "score": score
+                    }
+                    results.append(result)
+                
+                span.set_attribute("agent.results_count", len(results))
+                
+                logger.info(
+                    "knowledge_retrieval_completed",
+                    query=query[:100],
+                    results_count=len(results),
+                    source_filter=source_filter
+                )
+                
+                return results
             
         except Exception as e:
             logger.error(

@@ -26,6 +26,8 @@ from aise.ai_engine.openai_provider import OpenAIProvider
 from aise.ai_engine.deepseek_provider import DeepSeekProvider
 from aise.ai_engine.local_provider import OllamaProvider
 from aise.core.exceptions import ProviderError, AuthenticationError
+from aise.observability.tracer import get_tracer, llm_span
+from aise.observability.metrics import record_llm_call, record_llm_error
 
 logger = structlog.get_logger(__name__)
 
@@ -48,7 +50,8 @@ class LLMRouter:
         self._config = config
         self._providers: Dict[str, LLMProvider] = {}
         self._provider_failures: Dict[str, datetime] = {}
-        self._cooldown_minutes = 5  # Cooldown period after failure
+        self._cooldown_minutes = 5
+        self._tracer = get_tracer("aise.ai_engine.router")
         
         # Initialize providers based on configuration
         self._initialize_providers()
@@ -247,12 +250,35 @@ class LLMRouter:
                 )
                 
                 provider_instance = self._providers[provider_name]
-                result = await provider_instance.complete(
-                    messages=messages,
-                    system_prompt=system_prompt,
+                import time as _time
+                _t0 = _time.monotonic()
+                with llm_span(
+                    self._tracer,
+                    provider=provider_name,
+                    model=model or "default",
                     temperature=temperature,
-                    max_tokens=max_tokens,
-                    model=model
+                ) as span:
+                    result = await provider_instance.complete(
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        model=model
+                    )
+                    span.set_attribute("llm.prompt_tokens", result.usage.prompt_tokens)
+                    span.set_attribute("llm.completion_tokens", result.usage.completion_tokens)
+                    span.set_attribute("llm.total_tokens", result.usage.total_tokens)
+                    if result.usage.estimated_cost_usd is not None:
+                        span.set_attribute("llm.cost_usd", result.usage.estimated_cost_usd)
+                
+                _duration = _time.monotonic() - _t0
+                record_llm_call(
+                    provider=provider_name,
+                    model=result.model,
+                    prompt_tokens=result.usage.prompt_tokens,
+                    completion_tokens=result.usage.completion_tokens,
+                    duration_seconds=_duration,
+                    cost_usd=result.usage.estimated_cost_usd,
                 )
                 
                 logger.info(
@@ -264,7 +290,7 @@ class LLMRouter:
                 return result
                 
             except AuthenticationError as e:
-                # Authentication errors are permanent, mark as failed
+                record_llm_error(provider_name, "auth")
                 logger.error(
                     "provider_auth_failed",
                     provider=provider_name,
@@ -275,6 +301,7 @@ class LLMRouter:
                 continue
                 
             except ProviderError as e:
+                record_llm_error(provider_name, "provider_error")
                 # Temporary errors, try next provider
                 logger.warning(
                     "provider_failed_trying_next",

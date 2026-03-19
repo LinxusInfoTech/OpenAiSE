@@ -232,7 +232,7 @@ def add_context_processor(
     Returns:
         Event dictionary with context added
     """
-    event_dict['logger'] = logger.name
+    event_dict['logger'] = getattr(logger, 'name', None) or getattr(logger, '_name', None) or ''
     event_dict['level'] = method_name
     return event_dict
 

@@ -38,6 +38,7 @@ from aise.cli.commands.init import init_app
 from aise.cli.commands.config import config_app
 from aise.cli.commands.mode import mode_app
 from aise.cli.commands.ticket import ticket_app
+from aise.cli.commands.start import start_app
 
 app.add_typer(ask_app, name="ask")
 app.add_typer(learn_app, name="learn")
@@ -45,6 +46,7 @@ app.add_typer(init_app, name="init")
 app.add_typer(config_app, name="config")
 app.add_typer(mode_app, name="mode")
 app.add_typer(ticket_app, name="ticket")
+app.add_typer(start_app, name="start")
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ ask_app = typer.Typer(
 @ask_app.command()
 def main(
     question: str = typer.Argument(..., help="Your technical question"),
-    stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream response in real-time"),
+    stream: bool = typer.Option(True, "--stream", "--no-stream", help="Stream response in real-time"),
     mode: str = typer.Option("interactive", "--mode", "-m", help="Operational mode (interactive/approval/autonomous)")
 ):
     """Ask a technical question and get an AI-powered diagnosis.

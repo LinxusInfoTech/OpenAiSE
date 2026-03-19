@@ -47,7 +47,8 @@ class TestDatabaseManager:
         """Test that initialization creates connection pool."""
         db = DatabaseManager(mock_config)
         
-        with patch('aise.core.database.asyncpg.create_pool', return_value=mock_pool):
+        with patch('aise.core.database.asyncpg.create_pool', new_callable=AsyncMock) as mock_cp:
+            mock_cp.return_value = mock_pool
             with patch.object(db, '_initialize_schema', new_callable=AsyncMock):
                 await db.initialize()
         
@@ -129,7 +130,8 @@ class TestGlobalDatabaseFunctions:
     @pytest.mark.asyncio
     async def test_initialize_database_creates_manager(self, mock_config, mock_pool):
         """Test that initialize_database creates global manager."""
-        with patch('aise.core.database.asyncpg.create_pool', return_value=mock_pool):
+        with patch('aise.core.database.asyncpg.create_pool', new_callable=AsyncMock) as mock_cp:
+            mock_cp.return_value = mock_pool
             with patch('aise.core.database.DatabaseManager._initialize_schema', new_callable=AsyncMock):
                 db = await initialize_database(mock_config)
         

@@ -26,6 +26,7 @@ from aise.agents.state import TicketAnalysis
 from aise.ticket_system.base import Ticket
 from aise.ai_engine.router import LLMRouter
 from aise.core.exceptions import ProviderError
+from aise.observability.tracer import get_tracer, agent_span
 
 logger = structlog.get_logger(__name__)
 
@@ -82,6 +83,7 @@ class TicketAgent:
             llm_router: LLM router for completion requests
         """
         self._llm = llm_router
+        self._tracer = get_tracer("aise.agents.ticket")
         logger.info("ticket_agent_initialized")
     
     async def classify(self, ticket: Ticket) -> TicketAnalysis:
@@ -126,25 +128,37 @@ class TicketAgent:
                 }
             ]
             
-            # Get classification from LLM with structured output
-            result = await self._llm.complete(
-                messages=messages,
-                system_prompt=TICKET_CLASSIFICATION_PROMPT,
-                temperature=0.3,  # Lower temperature for more consistent classification
-                max_tokens=512
-            )
-            
-            # Parse JSON response
-            classification_data = self._parse_classification_response(result.content)
-            
-            # Create TicketAnalysis object
-            analysis = TicketAnalysis(
-                category=classification_data["category"],
-                severity=classification_data["severity"],
-                affected_service=classification_data["affected_service"],
-                suggested_tags=classification_data["suggested_tags"],
-                confidence=0.85  # Default confidence score
-            )
+            with agent_span(
+                self._tracer,
+                "ticket_agent.classify",
+                {
+                    "agent.ticket_id": ticket.id,
+                    "agent.subject_length": len(ticket.subject),
+                },
+            ) as span:
+                # Get classification from LLM with structured output
+                result = await self._llm.complete(
+                    messages=messages,
+                    system_prompt=TICKET_CLASSIFICATION_PROMPT,
+                    temperature=0.3,
+                    max_tokens=512
+                )
+                
+                # Parse JSON response
+                classification_data = self._parse_classification_response(result.content)
+                
+                # Create TicketAnalysis object
+                analysis = TicketAnalysis(
+                    category=classification_data["category"],
+                    severity=classification_data["severity"],
+                    affected_service=classification_data["affected_service"],
+                    suggested_tags=classification_data["suggested_tags"],
+                    confidence=0.85
+                )
+                
+                span.set_attribute("agent.category", analysis.category)
+                span.set_attribute("agent.severity", analysis.severity)
+                span.set_attribute("llm.tokens_used", result.usage.total_tokens)
             
             logger.info(
                 "ticket_classification_success",
