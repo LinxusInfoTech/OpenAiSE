@@ -232,10 +232,19 @@ class EngineerAgent:
         formatted = []
         
         for i, chunk in enumerate(chunks[:5], 1):  # Limit to top 5
+            # Support both dict (from KnowledgeAgent) and DocumentChunk objects
+            if isinstance(chunk, dict):
+                heading = chunk.get("heading_context", "")
+                source = chunk.get("source_url", "")
+                content = chunk.get("text", "")
+            else:
+                heading = chunk.heading_context
+                source = chunk.source_url
+                content = chunk.content
             formatted.append(
-                f"[{i}] {chunk.heading_context}\n"
-                f"Source: {chunk.source_url}\n"
-                f"{chunk.content}\n"
+                f"[{i}] {heading}\n"
+                f"Source: {source}\n"
+                f"{content}\n"
             )
         
         return "\n---\n".join(formatted)
