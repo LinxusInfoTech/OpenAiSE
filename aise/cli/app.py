@@ -32,7 +32,7 @@ def version():
 
 
 # Import and register command groups
-from aise.cli.commands.ask import ask_app
+from aise.cli.commands.ask import ask_app, main as ask_main
 from aise.cli.commands.learn import learn_app
 from aise.cli.commands.init import init_app
 from aise.cli.commands.config import config_app
@@ -40,7 +40,9 @@ from aise.cli.commands.mode import mode_app
 from aise.cli.commands.ticket import ticket_app
 from aise.cli.commands.start import start_app
 
-app.add_typer(ask_app, name="ask")
+# Register `aise ask "question"` as a top-level command
+app.command(name="ask")(ask_main)
+
 app.add_typer(learn_app, name="learn")
 app.add_typer(init_app, name="init")
 app.add_typer(config_app, name="config")

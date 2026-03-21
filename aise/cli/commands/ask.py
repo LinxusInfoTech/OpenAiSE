@@ -160,7 +160,8 @@ async def _ask_question(question: str, stream: bool, mode: str):
         if knowledge_chunks:
             console.print("\n[bold cyan]Sources:[/bold cyan]")
             for i, chunk in enumerate(knowledge_chunks[:3], 1):
-                console.print(f"  [{i}] {chunk.source_url}")
+                url = chunk.get("source_url", "") if isinstance(chunk, dict) else chunk.source_url
+                console.print(f"  [{i}] {url}")
             console.print()
         
         logger.info(
