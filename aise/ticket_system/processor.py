@@ -30,6 +30,18 @@ from aise.core.exceptions import ProviderError
 logger = structlog.get_logger(__name__)
 
 
+DEFAULT_SERVICE_TO_SOURCE: Dict[str, str] = {
+    "EC2": "aws",
+    "S3": "aws",
+    "RDS": "aws",
+    "Lambda": "aws",
+    "VPC": "aws",
+    "IAM": "aws",
+    "Kubernetes": "kubernetes",
+    "Docker": "docker",
+}
+
+
 class TicketProcessor:
     """Processes tickets through the complete workflow with classification.
     
@@ -47,7 +59,8 @@ class TicketProcessor:
         llm_router: LLMRouter,
         knowledge_agent: Optional[KnowledgeAgent] = None,
         conversation_memory: Optional[ConversationMemory] = None,
-        mode: str = "approval"
+        mode: str = "approval",
+        service_to_source: Optional[Dict[str, str]] = None,
     ):
         """Initialize ticket processor.
         
@@ -57,12 +70,16 @@ class TicketProcessor:
             knowledge_agent: Optional knowledge retrieval agent
             conversation_memory: Optional conversation memory
             mode: Operational mode (interactive, approval, autonomous)
+            service_to_source: Mapping of service names to documentation source
+                keys used for knowledge filtering. Defaults to
+                DEFAULT_SERVICE_TO_SOURCE.
         """
         self._ticket_provider = ticket_provider
         self._llm_router = llm_router
         self._knowledge_agent = knowledge_agent
         self._conversation_memory = conversation_memory
         self._mode = mode
+        self._service_to_source = service_to_source if service_to_source is not None else DEFAULT_SERVICE_TO_SOURCE
         
         # Initialize agents
         self._ticket_agent = TicketAgent(llm_router)
@@ -264,18 +281,7 @@ class TicketProcessor:
         # Note: This assumes the vector store supports filtering by service
         source_filter = None
         if classification.affected_service and classification.affected_service != "unknown":
-            # Map service names to documentation sources
-            service_to_source = {
-                "EC2": "aws",
-                "S3": "aws",
-                "RDS": "aws",
-                "Lambda": "aws",
-                "VPC": "aws",
-                "IAM": "aws",
-                "Kubernetes": "kubernetes",
-                "Docker": "docker"
-            }
-            source_filter = service_to_source.get(classification.affected_service)
+            source_filter = self._service_to_source.get(classification.affected_service)
         
         results = await self._knowledge_agent.retrieve(
             query=query,

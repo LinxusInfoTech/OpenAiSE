@@ -22,25 +22,46 @@ from aise.core.exceptions import KnowledgeEngineError
 logger = structlog.get_logger(__name__)
 
 
+DEFAULT_UNWANTED_TAGS = [
+    "script", "style", "noscript", "iframe", "embed", "object",
+    "svg", "canvas", "audio", "video", "form", "input", "button",
+    "select", "textarea",
+]
+
+DEFAULT_NAV_CLASSES = [
+    "nav", "navigation", "menu", "sidebar", "footer",
+    "header", "breadcrumb", "toc", "table-of-contents",
+    "advertisement", "ad", "banner", "cookie", "popup",
+]
+
+
 class ContentExtractor:
     """Extracts and converts HTML content to Markdown."""
-    
+
     def __init__(
         self,
         strip_tags: bool = True,
         convert_links: bool = True,
-        preserve_images: bool = False
+        preserve_images: bool = False,
+        unwanted_tags: Optional[list] = None,
+        nav_classes: Optional[list] = None,
     ):
         """Initialize content extractor.
-        
+
         Args:
             strip_tags: Remove script, style, and other non-content tags
             convert_links: Convert HTML links to Markdown links
             preserve_images: Include images in Markdown output
+            unwanted_tags: HTML tag names to strip entirely. Defaults to
+                DEFAULT_UNWANTED_TAGS. Pass an empty list to strip nothing.
+            nav_classes: CSS class substrings whose elements are removed as
+                navigation/chrome. Defaults to DEFAULT_NAV_CLASSES.
         """
         self.strip_tags = strip_tags
         self.convert_links = convert_links
         self.preserve_images = preserve_images
+        self.unwanted_tags = unwanted_tags if unwanted_tags is not None else DEFAULT_UNWANTED_TAGS
+        self.nav_classes = nav_classes if nav_classes is not None else DEFAULT_NAV_CLASSES
     
     async def extract_content(
         self,
@@ -105,41 +126,15 @@ class ContentExtractor:
         Args:
             soup: BeautifulSoup object to clean
         """
-        # Tags to remove completely
-        unwanted_tags = [
-            "script",
-            "style",
-            "noscript",
-            "iframe",
-            "embed",
-            "object",
-            "svg",
-            "canvas",
-            "audio",
-            "video",
-            "form",
-            "input",
-            "button",
-            "select",
-            "textarea"
-        ]
-        
-        for tag_name in unwanted_tags:
+        for tag_name in self.unwanted_tags:
             for tag in soup.find_all(tag_name):
                 tag.decompose()
         
-        # Remove navigation, footer, header, sidebar
+        # Remove navigation, footer, header, sidebar semantic elements
         for tag in soup.find_all(["nav", "footer", "header", "aside"]):
             tag.decompose()
         
-        # Remove elements with common navigation/sidebar classes
-        nav_classes = [
-            "nav", "navigation", "menu", "sidebar", "footer",
-            "header", "breadcrumb", "toc", "table-of-contents",
-            "advertisement", "ad", "banner", "cookie", "popup"
-        ]
-        
-        for class_name in nav_classes:
+        for class_name in self.nav_classes:
             for tag in soup.find_all(class_=lambda x: x and class_name in x.lower()):
                 tag.decompose()
         

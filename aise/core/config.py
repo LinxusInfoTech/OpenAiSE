@@ -656,14 +656,10 @@ class Config(BaseSettings):
         Returns:
             Dictionary representation of configuration
         """
+        _SENSITIVE_KEYWORDS = ("KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL")
         sensitive_fields = {
-            "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
-            "ZENDESK_API_TOKEN", "FRESHDESK_API_KEY",
-            "EMAIL_IMAP_PASSWORD", "EMAIL_SMTP_PASSWORD",
-            "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET",
-            "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
-            "CREDENTIAL_VAULT_KEY", "WEBHOOK_SECRET",
-            "LANGSMITH_API_KEY"
+            name for name in self.model_fields.keys()
+            if any(kw in name.upper() for kw in _SENSITIVE_KEYWORDS)
         }
         
         result = {}

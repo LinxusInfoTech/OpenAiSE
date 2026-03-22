@@ -75,13 +75,25 @@ class EngineerAgent:
     state immutability by always returning new state objects.
     """
     
-    def __init__(self, llm_router: LLMRouter):
+    def __init__(
+        self,
+        llm_router: LLMRouter,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ):
         """Initialize Engineer Agent.
         
         Args:
             llm_router: LLM router for completion requests
+            system_prompt: System prompt override. Defaults to ENGINEER_SYSTEM_PROMPT.
+            temperature: Sampling temperature for LLM completions.
+            max_tokens: Maximum tokens for LLM completions.
         """
         self._llm = llm_router
+        self._system_prompt = system_prompt if system_prompt is not None else ENGINEER_SYSTEM_PROMPT
+        self._temperature = temperature
+        self._max_tokens = max_tokens
         self._tracer = get_tracer("aise.agents.engineer")
         logger.info("engineer_agent_initialized")
     
@@ -131,9 +143,9 @@ class EngineerAgent:
             ) as span:
                 result = await self._llm.complete(
                     messages=prompt_messages,
-                    system_prompt=ENGINEER_SYSTEM_PROMPT,
-                    temperature=0.7,
-                    max_tokens=2048,
+                    system_prompt=self._system_prompt,
+                    temperature=self._temperature,
+                    max_tokens=self._max_tokens,
                     run_metadata=get_run_metadata(
                         ticket_id=state.get("ticket_id"),
                         mode=state["mode"],
@@ -298,9 +310,9 @@ class EngineerAgent:
             # Stream diagnosis from LLM
             async for token in self._llm.stream_complete(
                 messages=prompt_messages,
-                system_prompt=ENGINEER_SYSTEM_PROMPT,
-                temperature=0.7,
-                max_tokens=2048
+                system_prompt=self._system_prompt,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens
             ):
                 yield token
             
