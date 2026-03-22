@@ -492,16 +492,14 @@ def mask_sensitive_dict(
         {'api_key': 'sk-a****x789', 'username': 'john'}
     """
     if sensitive_keys is None:
-        sensitive_keys = [
-            "api_key", "api_token", "password", "secret", "token",
-            "access_key", "secret_key", "private_key", "credential"
-        ]
+        # Matches the same keywords used in config.py to_dict() auto-detection
+        sensitive_keys = ["KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL"]
     
     result = {}
     for key, value in data.items():
-        # Check if key contains any sensitive keyword
+        # Check if key contains any sensitive keyword (case-insensitive)
         is_sensitive = any(
-            sensitive_word in key.lower()
+            sensitive_word in key.upper()
             for sensitive_word in sensitive_keys
         )
         

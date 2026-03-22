@@ -112,15 +112,23 @@ class KnowledgeAgent:
                 )
                 
                 # Convert DocumentChunk objects to result dictionaries
+                # ChromaDB returns results ordered by ascending distance (lower = more similar).
+                # We convert distance → similarity score: score = 1 / (1 + distance)
                 results = []
-                for i, chunk in enumerate(chunks):
-                    score = 1.0 - (i / max(len(chunks), 1))
+                for chunk in chunks:
+                    # ChromaDB stores the distance in chunk metadata when available
+                    raw_distance = chunk.metadata.get("_distance")
+                    if raw_distance is not None:
+                        score = 1.0 / (1.0 + float(raw_distance))
+                    else:
+                        # Fallback: no distance info, treat as high relevance
+                        score = 1.0
                     result = {
                         "text": chunk.content,
                         "source_url": chunk.source_url,
                         "source_name": chunk.metadata.get("source", "unknown"),
                         "heading_context": chunk.heading_context,
-                        "score": score
+                        "score": score,
                     }
                     results.append(result)
                 

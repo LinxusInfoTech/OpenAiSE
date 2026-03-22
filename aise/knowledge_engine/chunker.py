@@ -270,7 +270,7 @@ class TextChunker:
         elif chunks and current_chunk.strip():
             # Merge small final chunk with previous chunk
             chunks[-1].content += "\n" + current_chunk
-            chunks[-1].id = self._generate_chunk_id(chunks[-1].content, source_url)
+            chunks[-1].id = self._generate_chunk_id(chunks[-1].content, source_url, len(chunks) - 1)
         
         return chunks
     

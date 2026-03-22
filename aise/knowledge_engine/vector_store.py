@@ -80,17 +80,21 @@ class DocumentChunk:
             self.id = self.generate_id(self.content, self.source_url)
     
     @staticmethod
-    def generate_id(content: str, source_url: str) -> str:
-        """Generate deterministic chunk ID from content and URL.
+    def generate_id(content: str, source_url: str, index: int = 0) -> str:
+        """Generate deterministic chunk ID from content, URL, and position index.
+        
+        Including the index prevents two chunks with identical content at
+        different positions in the same document from colliding.
         
         Args:
             content: Chunk content
             source_url: Source URL
+            index: Position index within the document (default 0)
         
         Returns:
             SHA256 hash as hex string
         """
-        combined = f"{content}{source_url}"
+        combined = f"{source_url}:{index}:{content}"
         return hashlib.sha256(combined.encode()).hexdigest()
 
 
@@ -361,14 +365,23 @@ class ChromaDBVectorStore(VectorStore):
             # Convert results to DocumentChunk objects
             chunks = []
             if results['ids'] and results['ids'][0]:
+                distances = results.get('distances', [[]])[0]
                 for i in range(len(results['ids'][0])):
                     metadata = results['metadatas'][0][i]
+                    
+                    # Carry the raw distance so callers can compute real similarity scores
+                    extra_meta = {}
+                    if i < len(distances):
+                        extra_meta["_distance"] = distances[i]
                     
                     chunk = DocumentChunk(
                         id=results['ids'][0][i],
                         content=results['documents'][0][i],
-                        metadata={k: v for k, v in metadata.items() 
-                                 if k not in ['source_url', 'heading_context', 'created_at']},
+                        metadata={
+                            **{k: v for k, v in metadata.items()
+                               if k not in ['source_url', 'heading_context', 'created_at']},
+                            **extra_meta,
+                        },
                         source_url=metadata.get('source_url', ''),
                         heading_context=metadata.get('heading_context', ''),
                         embedding=results['embeddings'][0][i] if results.get('embeddings') else None,

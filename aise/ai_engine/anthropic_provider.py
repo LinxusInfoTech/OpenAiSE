@@ -32,14 +32,26 @@ from aise.core.exceptions import ProviderError, AuthenticationError
 logger = structlog.get_logger(__name__)
 
 
-# Anthropic pricing per 1M tokens (as of 2024)
+# Anthropic pricing per 1M tokens (update as Anthropic publishes new rates)
 ANTHROPIC_PRICING = {
+    # Claude 3 family
     "claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
     "claude-3-sonnet-20240229": {"input": 3.00, "output": 15.00},
     "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
+    # Claude 3.5 family
+    "claude-3-5-sonnet-20240620": {"input": 3.00, "output": 15.00},
+    "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
+    # Claude 3.7 family
+    "claude-3-7-sonnet-20250219": {"input": 3.00, "output": 15.00},
+    # Claude 2 family
     "claude-2.1": {"input": 8.00, "output": 24.00},
     "claude-2.0": {"input": 8.00, "output": 24.00},
 }
+
+# Default fallback pricing used when a model is not in the table above.
+# Matches Claude 3 Sonnet as a conservative mid-range estimate.
+_DEFAULT_PRICING = {"input": 3.00, "output": 15.00}
 
 
 class AnthropicProvider(LLMProvider):
@@ -277,11 +289,10 @@ class AnthropicProvider(LLMProvider):
         """
         model = model or self._default_model
         
-        # Get pricing for model (default to Sonnet if not found)
-        pricing = ANTHROPIC_PRICING.get(
-            model,
-            ANTHROPIC_PRICING["claude-3-sonnet-20240229"]
-        )
+        # Get pricing for model; fall back to default if not in table
+        pricing = ANTHROPIC_PRICING.get(model, _DEFAULT_PRICING)
+        if model not in ANTHROPIC_PRICING:
+            logger.debug("anthropic_pricing_unknown_model", model=model, using_default=True)
         
         # Calculate cost (pricing is per 1M tokens)
         input_cost = (prompt_tokens / 1_000_000) * pricing["input"]

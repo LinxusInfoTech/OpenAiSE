@@ -106,7 +106,12 @@ class AiSEGraph:
             Configured AiSEGraph instance
         """
         ticket_agent = TicketAgent(llm_router)
-        engineer_agent = EngineerAgent(llm_router)
+        engineer_agent = EngineerAgent(
+            llm_router,
+            system_prompt=kwargs.get("engineer_system_prompt"),
+            temperature=kwargs.get("engineer_temperature", 0.7),
+            max_tokens=kwargs.get("engineer_max_tokens", 2048),
+        )
         
         # Optional knowledge agent
         knowledge_agent = None
@@ -265,7 +270,7 @@ class AiSEGraph:
                 ticket = await self._ticket_provider.get(state["ticket_id"])
                 state = update_state(state, ticket=ticket)
             
-            # Classify ticket
+            # Classify ticket (use the ticket from the (possibly updated) state)
             ticket_analysis = await self._ticket_agent.classify(state["ticket"])
             
             logger.info(
@@ -315,10 +320,20 @@ class AiSEGraph:
             
             query = " ".join(query_parts)
             
+            # Use classification to build a source filter (mirrors TicketProcessor logic)
+            from aise.ticket_system.processor import DEFAULT_SERVICE_TO_SOURCE
+            source_filter = None
+            classification = state.get("ticket_analysis")
+            if classification and classification.affected_service and classification.affected_service != "unknown":
+                source_filter = DEFAULT_SERVICE_TO_SOURCE.get(classification.affected_service)
+                if classification.affected_service not in query_parts:
+                    query = classification.affected_service + " " + query
+            
             # Retrieve documentation
             results = await self._knowledge_agent.retrieve(
                 query=query,
-                top_k=5
+                top_k=5,
+                source_filter=source_filter
             )
             
             # Convert dict results to DocumentChunk objects if needed
@@ -596,7 +611,7 @@ class AiSEGraph:
     
     def _detect_platform(self) -> str:
         """
-        Detect platform from ticket provider class name.
+        Detect platform from ticket provider class name, falling back to config.
         
         Returns:
             Platform name ("zendesk" or "freshdesk")
@@ -608,7 +623,17 @@ class AiSEGraph:
             elif "freshdesk" in provider_class:
                 return "freshdesk"
         
-        # Default to zendesk if can't detect
+        # Fall back to config-driven default if available
+        try:
+            from aise.core.config import get_config
+            config = get_config()
+            if getattr(config, "ZENDESK_SUBDOMAIN", None) or getattr(config, "ZENDESK_URL", None):
+                return "zendesk"
+            if getattr(config, "FRESHDESK_DOMAIN", None) or getattr(config, "FRESHDESK_URL", None):
+                return "freshdesk"
+        except Exception:
+            pass
+        
         logger.warning("could_not_detect_platform_defaulting_to_zendesk")
         return "zendesk"
     

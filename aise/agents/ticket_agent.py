@@ -76,13 +76,22 @@ class TicketAgent:
     severity, and affected service, and suggests relevant tags for organization.
     """
     
-    def __init__(self, llm_router: LLMRouter):
+    def __init__(
+        self,
+        llm_router: LLMRouter,
+        temperature: float = 0.3,
+        max_tokens: int = 512,
+    ):
         """Initialize Ticket Agent.
         
         Args:
             llm_router: LLM router for completion requests
+            temperature: Sampling temperature for classification completions.
+            max_tokens: Maximum tokens for classification completions.
         """
         self._llm = llm_router
+        self._temperature = temperature
+        self._max_tokens = max_tokens
         self._tracer = get_tracer("aise.agents.ticket")
         logger.info("ticket_agent_initialized")
     
@@ -140,8 +149,8 @@ class TicketAgent:
                 result = await self._llm.complete(
                     messages=messages,
                     system_prompt=TICKET_CLASSIFICATION_PROMPT,
-                    temperature=0.3,
-                    max_tokens=512
+                    temperature=self._temperature,
+                    max_tokens=self._max_tokens
                 )
                 
                 # Parse JSON response

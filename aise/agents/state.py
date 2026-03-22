@@ -246,9 +246,10 @@ def update_state(state: AiSEState, **updates) -> AiSEState:
     # Update timestamp
     new_state["updated_at"] = datetime.utcnow().isoformat()
     
-    # Apply updates
+    # Apply updates — raise on unknown keys to catch typos early
     for key, value in updates.items():
-        if key in new_state:
-            new_state[key] = value
+        if key not in new_state:
+            raise KeyError(f"update_state: unknown state key '{key}'")
+        new_state[key] = value
     
     return new_state

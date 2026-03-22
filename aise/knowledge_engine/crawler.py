@@ -73,7 +73,8 @@ class DocumentCrawler:
         max_pages: int = 1000,
         requests_per_second: float = 2.0,
         timeout: int = 30,
-        user_agent: str = "AiSE-DocumentCrawler/1.0"
+        user_agent: str = "AiSE-DocumentCrawler/1.0",
+        strip_query_params: bool = True,
     ):
         """Initialize document crawler.
         
@@ -83,11 +84,15 @@ class DocumentCrawler:
             requests_per_second: Rate limit for requests
             timeout: Request timeout in seconds
             user_agent: User agent string for requests
+            strip_query_params: Strip query parameters when normalising URLs.
+                Set to False for sites that use query params as page identity
+                (e.g. ``?id=getting-started``).
         """
         self.max_depth = max_depth
         self.max_pages = max_pages
         self.timeout = timeout
         self.user_agent = user_agent
+        self.strip_query_params = strip_query_params
         
         self.rate_limiter = RateLimiter(requests_per_second)
         self.robots_cache: Dict[str, RobotFileParser] = {}
@@ -464,7 +469,7 @@ class DocumentCrawler:
             return True
     
     def _normalize_url(self, url: str) -> str:
-        """Normalize URL by removing fragments and query parameters.
+        """Normalize URL by removing fragments and optionally query parameters.
         
         Args:
             url: URL to normalize
@@ -474,17 +479,16 @@ class DocumentCrawler:
         """
         parsed = urlparse(url)
         
-        # Remove fragment and query
         normalized = urlunparse((
             parsed.scheme,
             parsed.netloc,
             parsed.path,
             "",  # params
-            "",  # query
-            ""   # fragment
+            "" if self.strip_query_params else parsed.query,
+            ""   # fragment always stripped
         ))
         
-        # Remove trailing slash
+        # Remove trailing slash (but keep root "/")
         if normalized.endswith("/") and len(parsed.path) > 1:
             normalized = normalized[:-1]
         

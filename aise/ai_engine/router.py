@@ -370,6 +370,7 @@ class LLMRouter:
                     provider=provider_name,
                     error=str(e)
                 )
+                self._mark_provider_failed(provider_name)
                 last_error = e
                 continue
         
