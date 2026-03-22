@@ -324,6 +324,9 @@ class DocumentCrawler:
         except asyncio.TimeoutError:
             logger.warning("fetch_timeout", url=url)
             return None
+        except aiohttp.ClientResponseError as e:
+            logger.warning("fetch_error", url=url, error=str(e))
+            return None
         except Exception as e:
             logger.warning("fetch_error", url=url, error=str(e))
             return None
