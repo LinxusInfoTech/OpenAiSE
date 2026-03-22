@@ -122,8 +122,8 @@ class DocumentationRegistry:
             DocumentationSource(
                 name="ubuntu",
                 display_name="Ubuntu Documentation",
-                url="https://help.ubuntu.com/",
-                description="Official Ubuntu help and documentation",
+                url="https://ubuntu.com/server/docs/",
+                description="Official Ubuntu Server documentation",
                 category=SourceCategory.OTHER,
                 estimated_size_mb=80,
                 estimated_pages=1000,
@@ -144,8 +144,8 @@ class DocumentationRegistry:
             DocumentationSource(
                 name="gcp",
                 display_name="Google Cloud Platform (GCP)",
-                url="https://cloud.google.com/docs",
-                description="Official GCP documentation for Compute Engine, Cloud Storage, and GCP services",
+                url="https://cloud.google.com/compute/docs/",
+                description="Official GCP Compute Engine documentation covering VMs, networking, and GCP services",
                 category=SourceCategory.CLOUD_PROVIDER,
                 estimated_size_mb=350,
                 estimated_pages=7000,
@@ -157,7 +157,7 @@ class DocumentationRegistry:
             DocumentationSource(
                 name="kubernetes",
                 display_name="Kubernetes",
-                url="https://kubernetes.io/docs/",
+                url="https://kubernetes.io/docs/concepts/",
                 description="Official Kubernetes documentation for container orchestration",
                 category=SourceCategory.ORCHESTRATION,
                 estimated_size_mb=100,
@@ -192,7 +192,7 @@ class DocumentationRegistry:
             DocumentationSource(
                 name="ansible",
                 display_name="Ansible",
-                url="https://docs.ansible.com/",
+                url="https://docs.ansible.com/projects/ansible/latest/",
                 description="Official Ansible documentation for configuration management",
                 category=SourceCategory.INFRASTRUCTURE,
                 estimated_size_mb=70,
@@ -404,14 +404,14 @@ REGISTERED_SOURCES: List[Dict[str, str]] = [
     {"name": "aws", "url": "https://docs.aws.amazon.com/general/latest/gr/"},
     {"name": "aws-linux", "url": "https://docs.aws.amazon.com/linux/al2023/ug/"},
     {"name": "azure", "url": "https://learn.microsoft.com/en-us/azure/"},
-    {"name": "ubuntu", "url": "https://help.ubuntu.com/"},
+    {"name": "ubuntu", "url": "https://ubuntu.com/server/docs/"},
     {"name": "git", "url": "https://git-scm.com/doc"},
-    {"name": "kubernetes", "url": "https://kubernetes.io/docs/"},
-    {"name": "gcp", "url": "https://cloud.google.com/docs"},
+    {"name": "kubernetes", "url": "https://kubernetes.io/docs/concepts/"},
+    {"name": "gcp", "url": "https://cloud.google.com/compute/docs/"},
     {"name": "docker", "url": "https://docs.docker.com/"},
     {"name": "terraform", "url": "https://developer.hashicorp.com/terraform/docs"},
     {"name": "ibm-cloud", "url": "https://cloud.ibm.com/docs"},
-    {"name": "oracle", "url": "https://docs.oracle.com/en-us/iaas"},
+    {"name": "oracle", "url": "https://docs.oracle.com/en-us/iaas/Content/home.htm"},
 ]
 
 
