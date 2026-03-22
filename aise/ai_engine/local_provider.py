@@ -143,8 +143,9 @@ class OllamaProvider(LLMProvider):
             )
             
         except httpx.HTTPStatusError as e:
-            logger.error("ollama_http_error", status=e.response.status_code, error=str(e))
-            raise ProviderError(f"Ollama API error: {str(e)}")
+            body = e.response.text[:200] if e.response.text else "(no body)"
+            logger.error("ollama_http_error", status=e.response.status_code, body=body)
+            raise ProviderError(f"Ollama API error {e.response.status_code}: {body}")
         
         except httpx.ConnectError as e:
             logger.error("ollama_connection_error", error=str(e))
@@ -228,8 +229,9 @@ class OllamaProvider(LLMProvider):
             logger.info("ollama_stream_complete", model=model)
             
         except httpx.HTTPStatusError as e:
-            logger.error("ollama_http_error", status=e.response.status_code, error=str(e))
-            raise ProviderError(f"Ollama API error: {str(e)}")
+            body = e.response.text[:200] if e.response.text else "(no body)"
+            logger.error("ollama_http_error", status=e.response.status_code, body=body)
+            raise ProviderError(f"Ollama API error {e.response.status_code}: {body}")
         
         except httpx.ConnectError as e:
             logger.error("ollama_connection_error", error=str(e))
