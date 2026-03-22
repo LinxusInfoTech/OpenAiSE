@@ -283,8 +283,8 @@ def setup_logging(
     if debug:
         log_level = "DEBUG"
     
-    # Determine output format
-    use_json = json_output or not debug
+    # Determine output format — use pretty console unless JSON explicitly requested
+    use_json = json_output
     
     # Configure standard logging
     logging.basicConfig(
@@ -292,6 +292,12 @@ def setup_logging(
         stream=sys.stdout,
         level=getattr(logging, log_level.upper())
     )
+
+    # Silence noisy third-party loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("chromadb").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
     
     # Build processor chain
     processors: List[Processor] = [

@@ -263,9 +263,15 @@ install_aise_command() {
     fi
 
     # Create a wrapper script so the venv Python is always used
+    # Also cd to the project directory so .env is always found
+    PROJ_DIR="$(pwd)"
     $SUDO tee /usr/local/bin/aise > /dev/null <<EOF
 #!/usr/bin/env bash
-# AiSE wrapper — runs inside its Poetry virtualenv
+# AiSE wrapper — runs inside its Poetry virtualenv from the project directory
+# Change to project dir so .env is always found, unless user is already there
+if [ ! -f ".env" ]; then
+    cd "${PROJ_DIR}" 2>/dev/null || true
+fi
 exec "${AISE_BIN}" "\$@"
 EOF
     $SUDO chmod +x /usr/local/bin/aise

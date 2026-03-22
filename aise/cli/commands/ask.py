@@ -70,8 +70,7 @@ async def _ask_question(question: str, stream: bool, mode: str):
         # Load configuration
         config = load_config()
         
-        # Initialize components
-        console.print("\n[dim]Initializing...[/dim]")
+        # Initialize components silently
         
         # Initialize LLM router
         try:
@@ -119,37 +118,29 @@ async def _ask_question(question: str, stream: bool, mode: str):
         )
         
         # Retrieve relevant knowledge
-        console.print("[dim]Searching knowledge base...[/dim]")
         knowledge_chunks = await knowledge_agent.retrieve(
             query=question,
             top_k=5
         )
         
         if knowledge_chunks:
-            console.print(f"[dim]Found {len(knowledge_chunks)} relevant documentation chunks[/dim]\n")
             state["knowledge_context"] = knowledge_chunks
         else:
             print_warning(
-                "No documentation indexed yet. Run 'aise init' to index documentation sources.\n"
+                "No documentation indexed yet. Run 'aise init run' to index documentation sources.\n"
                 "Proceeding with general knowledge only."
             )
         
         # Generate diagnosis
         if stream:
-            # Stream response
-            console.print("[bold cyan]Diagnosis:[/bold cyan]\n")
-            
+            console.print()
             diagnosis_text = ""
             async for token in engineer_agent.stream_diagnose(state):
                 console.print(token, end="")
                 diagnosis_text += token
-            
             console.print("\n")
             
         else:
-            # Non-streaming response
-            console.print("[dim]Analyzing...[/dim]\n")
-            
             result_state = await engineer_agent.diagnose(state)
             diagnosis_text = result_state["diagnosis"]
             
